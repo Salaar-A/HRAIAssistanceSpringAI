@@ -8,6 +8,7 @@ import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.core.io.Resource;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -18,15 +19,23 @@ public class FileLoader implements CommandLineRunner {
 
     private final VectorStore vectorStore;
 
+    private final JdbcTemplate jdbcTemplate;
+
     @Value("classpath:/docs/employeedata.csv")
     private Resource employeeData;
 
-    public FileLoader(VectorStore vectorStore) {
+    public FileLoader(VectorStore vectorStore,JdbcTemplate jdbcTemplate) {
         this.vectorStore = vectorStore;
+        this.jdbcTemplate = jdbcTemplate;
     }
 
     @Override
     public void run(String... args) throws Exception {
+        Integer count = jdbcTemplate.queryForObject("SELECT count(*) FROM vector_store", Integer.class);
+        if (count != null && count > 0) {
+            System.out.println("Vectors already loaded: " + count + ", skipping");
+            return;
+        }
         List<Document> pages = new TextReader(employeeData).read();  // 1. read
         List<Document> chunks = new TokenTextSplitter().split(pages);   // 2. split
         vectorStore.add(chunks);                                        // 3. store
