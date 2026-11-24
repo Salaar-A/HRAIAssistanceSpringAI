@@ -1,19 +1,15 @@
 package com.ai.hraiassistance.service;
 
-import com.ai.hraiassistance.dto.Employee;
+import com.ai.hraiassistance.entity.Employee;
+import com.ai.hraiassistance.repo.EmployeeRepo;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
-
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -25,15 +21,9 @@ public class HRAssistanceService {
 
     private final List<Employee> employees;
 
-    public HRAssistanceService(@Value("classpath:/docs/employeedata.csv") Resource csv,VectorStore vectorStore) throws IOException {
+    public HRAssistanceService(VectorStore vectorStore, EmployeeRepo employeeRepo) throws IOException {
         this.vectorStore = vectorStore;
-        try (var reader = new BufferedReader(new InputStreamReader(csv.getInputStream()))) {
-            this.employees = reader.lines()
-                    .skip(1)                                  // skip header
-                    .map(line -> line.split(","))
-                    .map(p -> new Employee(Integer.parseInt(p[0]), p[1], p[2], p[3]))
-                    .toList();
-        }
+        this.employees = employeeRepo.findAll();
     }
 
 
@@ -53,19 +43,19 @@ public class HRAssistanceService {
     @Tool(description = "Count employees by employment type, such as Full-time, Contract or Intern")
     public long checkEmployeeTypeCount(String employeeType){
         log.info("Triggered the employee type count..{}",employeeType);
-        return employees.stream().filter(e->e.employmentType().equalsIgnoreCase(employeeType)).count();
+        return employees.stream().filter(e->e.getEmploymentType().equalsIgnoreCase(employeeType)).count();
     }
 
     @Tool(description = "Count employees with a given designation ONLY NOT EMPLOYMENT TYPE. Valid values: Software Engineer, Senior Software Engineer, QA Engineer, Team Lead, DevOps Engineer, HR Executive, Business Analyst, Accountant, Manager")
     public long countByDesignation(String designationType){
         log.info("Triggered the designation type..{}",designationType);
-        return employees.stream().filter(e->e.designation().equalsIgnoreCase(designationType)).count();
+        return employees.stream().filter(e->e.getDesignation().equalsIgnoreCase(designationType)).count();
     }
 
     @Tool(description = "Count employees by BOTH designation and employment type. Use this when the question mentions a designation AND an employment type, e.g. 'Team Leads on contract'.")
     public long CountByEmployeeDesignationAndEmploymentType(@ToolParam(description = "Employment type: Full-time, Contract or Intern") String employeeType, @ToolParam(description = "Designation, e.g. Team Lead, QA Engineer") String designationType){
         log.info("Triggered the designation type..{}, {}",designationType, employeeType);
-        return employees.stream().filter(e->e.designation().equalsIgnoreCase(designationType) && e.employmentType().equalsIgnoreCase(employeeType)).count();
+        return employees.stream().filter(e->e.getDesignation().equalsIgnoreCase(designationType) && e.getEmploymentType().equalsIgnoreCase(employeeType)).count();
     }
 
     // Tool annotation used to mention filter or the scenario that AI can use to call when matching query is asked by user.
@@ -81,12 +71,28 @@ public class HRAssistanceService {
         log.info("countEmployees -> designation={}, type={}", designation, employmentType);
 
         return employees.stream()
-                .filter(e -> isEmpty(designation) || e.designation().equalsIgnoreCase(designation.trim()))
-                .filter(e -> isEmpty(employmentType) || e.employmentType().equalsIgnoreCase(employmentType.trim()))
+                .filter(e -> isEmpty(designation) || e.getDesignation().equalsIgnoreCase(designation.trim()))
+                .filter(e -> isEmpty(employmentType) || e.getEmploymentType().equalsIgnoreCase(employmentType.trim()))
                 .count();
     }
 
     private boolean isEmpty(String s) {
         return s == null || s.isBlank();
+    }
+
+    @Tool(description = "Search the company HR policy documents. Use for questions about company rules such as leave policy, work from home, learning budget, notice period, working hours.")
+    public String searchPolicy(
+            @ToolParam(description = "What to search for, e.g. 'paid leave days' or 'work from home rules'") String query) {
+
+        log.info("searchPolicy -> {}", query);
+        List<Document> results = vectorStore.similaritySearch(
+                SearchRequest.builder().query(query).topK(3).build());
+
+        if (results.isEmpty()) {
+            return "No matching policy found.";
+        }
+        return results.stream()
+                .map(Document::getText)
+                .collect(Collectors.joining("\n---\n"));
     }
 }
